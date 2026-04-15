@@ -1,0 +1,189 @@
+{
+  "name": "SaaS Chat Query Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "Chat_test",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-chat",
+      "name": "Webhook: Chat Query",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "Chat_test"
+    },
+    {
+      "parameters": {
+        "resource": "embedding",
+        "model": "text-embedding-3-small",
+        "input": "={{ $json.body.message }}",
+        "options": {}
+      },
+      "id": "embed-query",
+      "name": "Embed Query (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [480, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 從上游取得 query embedding\nconst queryEmbedding = $json.data[0].embedding;\nconst body = $('Webhook: Chat Query').first().json.body;\n\nreturn [{\n  json: {\n    chatbot_id:      body.chatbot_id,\n    namespace:       body.namespace,\n    session_id:      body.session_id,\n    message:         body.message,\n    query_embedding: queryEmbedding\n  }\n}];"
+      },
+      "id": "prepare-query",
+      "name": "Prepare Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://{{ $env.PINECONE_HOST }}/query",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "vector",
+              "value": "={{ $json.query_embedding }}"
+            },
+            {
+              "name": "topK",
+              "value": "5"
+            },
+            {
+              "name": "includeMetadata",
+              "value": "true"
+            },
+            {
+              "name": "namespace",
+              "value": "={{ $json.namespace }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "query-pinecone",
+      "name": "Query Pinecone",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "pinecone-creds",
+          "name": "Pinecone API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 將 Pinecone 搜尋結果整理成 context 文字，組合成 LLM prompt\nconst matches  = $json.matches || [];\nconst prevData = $('Prepare Query').first().json;\n\n// 取相關段落（score > 0.5）\nconst context = matches\n  .filter(m => m.score > 0.5)\n  .map(m => m.metadata?.text || '')\n  .join('\\n\\n---\\n\\n');\n\nconst systemPrompt = `你是一位活動資訊助理。請根據以下活動資料回答問題，不確定的事項請誠實說明。\n\n【活動資料】\n${context || '（目前無相關資料）'}`;\n\nreturn [{\n  json: {\n    chatbot_id: prevData.chatbot_id,\n    session_id: prevData.session_id,\n    message:    prevData.message,\n    system:     systemPrompt\n  }\n}];"
+      },
+      "id": "build-prompt",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.system }}"
+            },
+            {
+              "role": "user",
+              "content": "={{ $json.message }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 800,
+          "temperature": 0.3
+        }
+      },
+      "id": "llm-answer",
+      "name": "LLM Answer (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [1440, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 取出 LLM 回覆文字\nconst answer = $json.choices?.[0]?.message?.content || '抱歉，目前無法回答，請稍後再試。';\nreturn [{ json: { text: answer } }];"
+      },
+      "id": "extract-answer",
+      "name": "Extract Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"text\": \"{{ $json.text }}\" }",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1920, 300]
+    }
+  ],
+  "connections": {
+    "Webhook: Chat Query": {
+      "main": [[{ "node": "Embed Query (OpenAI)", "type": "main", "index": 0 }]]
+    },
+    "Embed Query (OpenAI)": {
+      "main": [[{ "node": "Prepare Query", "type": "main", "index": 0 }]]
+    },
+    "Prepare Query": {
+      "main": [[{ "node": "Query Pinecone", "type": "main", "index": 0 }]]
+    },
+    "Query Pinecone": {
+      "main": [[{ "node": "Build Prompt", "type": "main", "index": 0 }]]
+    },
+    "Build Prompt": {
+      "main": [[{ "node": "LLM Answer (OpenAI)", "type": "main", "index": 0 }]]
+    },
+    "LLM Answer (OpenAI)": {
+      "main": [[{ "node": "Extract Answer", "type": "main", "index": 0 }]]
+    },
+    "Extract Answer": {
+      "main": [[{ "node": "Webhook Response", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "_comment": [
+    "【使用前必填的 n8n 環境變數（Settings > Variables）】",
+    "PINECONE_HOST = your-index-xxxx.svc.region.pinecone.io",
+    "",
+    "【Credential 設定】",
+    "1. OpenAI API Key → 建立 'OpenAI API' credential",
+    "2. Pinecone API Key → 建立 HTTP Header Auth，Header Name: Api-Key"
+  ]
+}

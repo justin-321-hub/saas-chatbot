@@ -1,0 +1,266 @@
+{
+  "name": "SaaS PDF Processing Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "PDF_processing",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-pdf",
+      "name": "Webhook: PDF Processing",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "PDF_processing"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.body.pdf_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "http-download-pdf",
+      "name": "Download PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "operation": "extractText",
+        "options": {}
+      },
+      "id": "extract-text",
+      "name": "Extract PDF Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 將 PDF 全文分割成適合 RAG 的段落\n// 策略：按段落換行分切，每塊 ~500 字，重疊 ~50 字\n\nconst fullText = $input.first().json.text || '';\nconst CHUNK_SIZE = 500;\nconst OVERLAP    = 50;\n\nif (!fullText.trim()) {\n  throw new Error('PDF 內容為空或無法解析');\n}\n\n// 先以雙換行分段，再合併到目標長度\nconst paragraphs = fullText.split(/\\n{2,}/).map(p => p.replace(/\\n/g, ' ').trim()).filter(Boolean);\n\nconst chunks = [];\nlet current  = '';\n\nfor (const para of paragraphs) {\n  if ((current + ' ' + para).trim().length <= CHUNK_SIZE) {\n    current = (current + ' ' + para).trim();\n  } else {\n    if (current) chunks.push(current);\n    // 若單段超長，強制切割\n    if (para.length > CHUNK_SIZE) {\n      for (let i = 0; i < para.length; i += CHUNK_SIZE - OVERLAP) {\n        chunks.push(para.slice(i, i + CHUNK_SIZE));\n      }\n      current = '';\n    } else {\n      current = para;\n    }\n  }\n}\nif (current) chunks.push(current);\n\nconst chatbotId = $('Webhook: PDF Processing').first().json.body.chatbot_id;\nconst namespace  = $('Webhook: PDF Processing').first().json.body.namespace;\n\nreturn chunks.map((text, index) => ({\n  json: {\n    chatbot_id: chatbotId,\n    namespace,\n    chunk_index: index,\n    text\n  }\n}));"
+      },
+      "id": "split-chunks",
+      "name": "Split into Chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "resource": "embedding",
+        "model": "text-embedding-3-small",
+        "input": "={{ $json.text }}",
+        "options": {}
+      },
+      "id": "embed-chunks",
+      "name": "Embed Chunks (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [1200, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 將前一步的 embedding 結果與 chunk 資料合併，準備寫入 Pinecone\nconst embedding = $json.data[0].embedding;\nconst chunk     = $('Split into Chunks').item.json;\n\nreturn [{\n  json: {\n    id:        `${chunk.chatbot_id}-${chunk.chunk_index}`,\n    values:    embedding,\n    metadata: {\n      chatbot_id:  chunk.chatbot_id,\n      chunk_index: chunk.chunk_index,\n      text:        chunk.text\n    },\n    namespace: chunk.namespace\n  }\n}];"
+      },
+      "id": "prepare-pinecone",
+      "name": "Prepare for Pinecone",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://{{ $env.PINECONE_HOST }}/vectors/upsert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "vectors",
+              "value": "=[{ \"id\": \"{{ $json.id }}\", \"values\": {{ $json.values }}, \"metadata\": {{ $json.metadata }} }]"
+            },
+            {
+              "name": "namespace",
+              "value": "={{ $json.namespace }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "upsert-pinecone",
+      "name": "Upsert to Pinecone",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "pinecone-creds",
+          "name": "Pinecone API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 統計成功寫入的向量數量\nconst allItems = $input.all();\nconst chatbotId = $('Webhook: PDF Processing').first().json.body.chatbot_id;\nreturn [{ json: { chatbot_id: chatbotId, chunk_count: allItems.length } }];"
+      },
+      "id": "aggregate-result",
+      "name": "Aggregate Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SAAS_BACKEND_URL }}/api/saas/chatbots/{{ $json.chatbot_id }}/complete",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-callback-secret",
+              "value": "={{ $env.SAAS_CALLBACK_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "ready"
+            },
+            {
+              "name": "chunk_count",
+              "value": "={{ $json.chunk_count }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "callback-success",
+      "name": "Callback: success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2160, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SAAS_BACKEND_URL }}/api/saas/chatbots/{{ $('Webhook: PDF Processing').first().json.body.chatbot_id }}/complete",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-callback-secret",
+              "value": "={{ $env.SAAS_CALLBACK_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "error"
+            },
+            {
+              "name": "error_msg",
+              "value": "={{ $json.message || 'Unknown error' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "callback-error",
+      "name": "Callback: error",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2160, 420]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true }",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [480, 520]
+    }
+  ],
+  "connections": {
+    "Webhook: PDF Processing": {
+      "main": [
+        [
+          { "node": "Download PDF",     "type": "main", "index": 0 },
+          { "node": "Webhook Response", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Download PDF": {
+      "main": [[{ "node": "Extract PDF Text", "type": "main", "index": 0 }]]
+    },
+    "Extract PDF Text": {
+      "main": [[{ "node": "Split into Chunks", "type": "main", "index": 0 }]]
+    },
+    "Split into Chunks": {
+      "main": [[{ "node": "Embed Chunks (OpenAI)", "type": "main", "index": 0 }]]
+    },
+    "Embed Chunks (OpenAI)": {
+      "main": [[{ "node": "Prepare for Pinecone", "type": "main", "index": 0 }]]
+    },
+    "Prepare for Pinecone": {
+      "main": [[{ "node": "Upsert to Pinecone", "type": "main", "index": 0 }]]
+    },
+    "Upsert to Pinecone": {
+      "main": [[{ "node": "Aggregate Result", "type": "main", "index": 0 }]]
+    },
+    "Aggregate Result": {
+      "main": [[{ "node": "Callback: success", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "error-handler"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "_comment": [
+    "【使用前必填的 n8n 環境變數（Settings > Variables）】",
+    "SAAS_BACKEND_URL   = https://saas-chatbot-server.onrender.com",
+    "SAAS_CALLBACK_SECRET = 與 server/.env 相同的值",
+    "PINECONE_HOST      = your-index-xxxx.svc.region.pinecone.io",
+    "",
+    "【Credential 設定】",
+    "1. OpenAI API Key → 建立 'OpenAI API' credential",
+    "2. Pinecone API Key → 建立 HTTP Header Auth，Header Name: Api-Key"
+  ]
+}
