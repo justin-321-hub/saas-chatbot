@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>活動 Chatbot</title>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f0f4ff;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #2563eb;
+      color: #fff;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .bot-avatar {
+      width: 36px; height: 36px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+
+    .bot-info { flex: 1; }
+    .bot-name   { font-size: 15px; font-weight: 600; }
+    .bot-status { font-size: 12px; opacity: 0.8; }
+
+    /* ── Messages ── */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .bubble-wrap {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+    }
+    .bubble-wrap.user { flex-direction: row-reverse; }
+
+    .avatar {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .avatar.bot  { background: #2563eb; color: #fff; }
+    .avatar.user { background: #e2e8f0; }
+
+    .bubble {
+      max-width: 75%;
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .bubble.bot  {
+      background: #fff;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+    }
+    .bubble.user {
+      background: #2563eb;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+
+    .typing span {
+      display: inline-block;
+      width: 7px; height: 7px;
+      background: #94a3b8;
+      border-radius: 50%;
+      animation: bounce 1.2s infinite;
+      margin: 0 2px;
+    }
+    .typing span:nth-child(2) { animation-delay: 0.2s; }
+    .typing span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); }
+      40%            { transform: translateY(-6px); }
+    }
+
+    /* ── Input ── */
+    .input-bar {
+      background: #fff;
+      border-top: 1px solid #e2e8f0;
+      padding: 12px 16px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
+    textarea {
+      flex: 1;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      outline: none;
+      max-height: 120px;
+      transition: border-color 0.2s;
+      line-height: 1.5;
+    }
+    textarea:focus { border-color: #2563eb; }
+
+    .btn-send {
+      width: 42px; height: 42px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+    .btn-send:hover    { background: #1d4ed8; }
+    .btn-send:disabled { background: #93c5fd; cursor: not-allowed; }
+
+    /* ── Error / Loading state ── */
+    .center-msg {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px; color: #64748b; text-align: center; padding: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="bot-avatar">🤖</div>
+  <div class="bot-info">
+    <div class="bot-name" id="bot-name">載入中…</div>
+    <div class="bot-status" id="bot-status"></div>
+  </div>
+</header>
+
+<div class="messages" id="messages"></div>
+
+<div class="input-bar" id="input-bar" style="display:none">
+  <textarea id="msg-input" placeholder="輸入您的問題…" rows="1"
+    oninput="autoResize(this)" onkeydown="onKey(event)"></textarea>
+  <button class="btn-send" id="send-btn" onclick="sendMessage()">➤</button>
+</div>
+
+<script>
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  const params    = new URLSearchParams(location.search);
+  const rawId     = params.get('id') || '';
+  const chatbotId = UUID_RE.test(rawId) ? rawId : null;  // 非 UUID 直接視為無效
+
+  // session_id 也限制為 UUID 格式，不從 localStorage 繼承非法值
+  const storedSession = localStorage.getItem('saas_session') || '';
+  const sessionId     = UUID_RE.test(storedSession) ? storedSession : crypto.randomUUID();
+  localStorage.setItem('saas_session', sessionId);
+
+  let isTyping = false;
+
+  // 驗證 CSS 顏色值（只允許 hex 色碼，防止 CSS injection）
+  function safeCssColor(value) {
+    return /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(value) ? value : '#2563eb';
+  }
+
+  // ── 初始化 ──
+  async function init() {
+    if (!chatbotId) {
+      showCenter('找不到 Chatbot ID，請確認連結是否正確。');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/saas/chatbots/${chatbotId}/status`);
+      if (!res.ok) { showCenter('找不到此 Chatbot。'); return; }
+
+      const data = await res.json();
+      document.title = data.name + ' — Chatbot';
+      document.getElementById('bot-name').textContent = data.name;
+
+      if (data.status !== 'ready') {
+        showCenter(data.status === 'processing'
+          ? '⏳ Chatbot 正在建立中，請稍後再試。'
+          : '❌ Chatbot 建立失敗，請聯絡管理員。');
+        return;
+      }
+
+      document.getElementById('bot-status').textContent = '已就緒・可以提問';
+      document.getElementById('input-bar').style.display = '';
+
+      // 套用主題色（驗證格式，防止 CSS injection）
+      const color = safeCssColor(data.settings?.theme_color);
+      document.querySelector('header').style.background = color;
+      document.querySelectorAll('.btn-send, .avatar.bot').forEach(el => {
+        el.style.background = color;
+      });
+      document.querySelectorAll('.bubble.user').forEach(el => {
+        el.style.background = color;
+      });
+
+      addBubble('bot', data.settings?.welcome_message || '您好！有什麼關於本活動的問題嗎？');
+    } catch (err) {
+      console.error('[init] error:', err.message);
+      showCenter('載入失敗，請檢查網路後重新整理頁面。');
+    }
+  }
+
+  // ── 發送訊息 ──
+  async function sendMessage() {
+    if (isTyping) return;
+    const input = document.getElementById('msg-input');
+    const text  = input.value.trim();
+    if (!text) return;
+
+    input.value = '';
+    autoResize(input);
+    addBubble('user', text);
+    showTyping();
+    document.getElementById('send-btn').disabled = true;
+    isTyping = true;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/saas/chatbots/${chatbotId}/chat`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, session_id: sessionId })
+      });
+
+      removeTyping();
+      const data = await res.json();
+
+      if (!res.ok) {
+        addBubble('bot', '抱歉，發生錯誤：' + (data.error || '請稍後再試'));
+      } else {
+        addBubble('bot', data.text || data.answer || '（無回應）');
+      }
+    } catch (err) {
+      removeTyping();
+      addBubble('bot', '連線失敗，請檢查網路後再試。');
+    } finally {
+      document.getElementById('send-btn').disabled = false;
+      isTyping = false;
+    }
+  }
+
+  // ── UI 工具 ──
+  function addBubble(role, text) {
+    const wrap = document.createElement('div');
+    wrap.className = `bubble-wrap ${role}`;
+    wrap.innerHTML = `
+      <div class="avatar ${role}">${role === 'bot' ? '🤖' : '👤'}</div>
+      <div class="bubble ${role}">${escapeHtml(text)}</div>
+    `;
+    document.getElementById('messages').appendChild(wrap);
+    scrollToBottom();
+  }
+
+  function showTyping() {
+    const wrap = document.createElement('div');
+    wrap.className = 'bubble-wrap bot';
+    wrap.id = 'typing-indicator';
+    wrap.innerHTML = `
+      <div class="avatar bot">🤖</div>
+      <div class="bubble bot typing">
+        <span></span><span></span><span></span>
+      </div>
+    `;
+    document.getElementById('messages').appendChild(wrap);
+    scrollToBottom();
+  }
+
+  function removeTyping() {
+    document.getElementById('typing-indicator')?.remove();
+  }
+
+  function showCenter(msg) {
+    // 用 DOM API 而非 innerHTML，防止未來意外傳入外部資料時產生 XSS
+    const el = document.getElementById('messages');
+    el.innerHTML = '';
+    const div = document.createElement('div');
+    div.className   = 'center-msg';
+    div.textContent = msg;
+    el.appendChild(div);
+  }
+
+  function scrollToBottom() {
+    const el = document.getElementById('messages');
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  }
+
+  function onKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
+
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  init();
+</script>
+</body>
+</html>

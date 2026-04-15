@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartChatbot — Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"
+          integrity="sha384-2zrRDgDHSYB/GN3nFW3fsZXoxEhKIr3N2h63Tc6DEOB9JJdFIu8xMJT2Cph/gBil"
+          crossorigin="anonymous"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f0f4ff;
+      min-height: 100vh;
+      color: #1e293b;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 0 32px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo { font-size: 18px; font-weight: 700; color: #2563eb; }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: #64748b;
+    }
+
+    .btn-logout {
+      padding: 6px 14px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 6px;
+      background: #fff;
+      color: #64748b;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-logout:hover { border-color: #dc2626; color: #dc2626; }
+
+    /* ── Main layout ── */
+    main {
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    /* ── Upload card ── */
+    .upload-card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+      padding: 28px;
+      margin-bottom: 36px;
+    }
+
+    .upload-card h2 { margin-bottom: 20px; }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group.full { grid-column: 1 / -1; }
+
+    label { font-size: 13px; font-weight: 500; color: #374151; }
+
+    input[type="text"], input[type="email"], textarea {
+      padding: 10px 14px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+      font-family: inherit;
+    }
+    input:focus, textarea:focus { border-color: #2563eb; }
+
+    .file-drop {
+      border: 2px dashed #cbd5e1;
+      border-radius: 10px;
+      padding: 28px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: #f8fafc;
+      position: relative;
+    }
+    .file-drop:hover, .file-drop.drag { border-color: #2563eb; background: #eff6ff; }
+    .file-drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+    .file-drop .icon { font-size: 32px; margin-bottom: 8px; }
+    .file-drop .hint { font-size: 13px; color: #64748b; }
+    .file-drop .filename { font-size: 14px; font-weight: 600; color: #2563eb; margin-top: 6px; }
+
+    .btn-primary {
+      padding: 11px 28px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-top: 16px;
+    }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-primary:disabled { background: #93c5fd; cursor: not-allowed; }
+
+    .upload-msg {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+    }
+    .upload-msg.error   { background: #fef2f2; color: #dc2626; display: block; }
+    .upload-msg.success { background: #f0fdf4; color: #16a34a; display: block; }
+    .upload-msg.info    { background: #eff6ff; color: #2563eb; display: block; }
+
+    /* ── Chatbot list ── */
+    .list-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .chatbot-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+    }
+
+    .chatbot-card {
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .chatbot-name {
+      font-size: 15px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chatbot-meta { font-size: 12px; color: #94a3b8; }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status-badge.ready      { background: #dcfce7; color: #16a34a; }
+    .status-badge.processing { background: #fef9c3; color: #ca8a04; }
+    .status-badge.error      { background: #fee2e2; color: #dc2626; }
+
+    .spinner {
+      width: 10px; height: 10px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .card-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+    .btn-sm {
+      flex: 1;
+      padding: 7px 10px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    .btn-copy   { background: #eff6ff; color: #2563eb; }
+    .btn-copy:hover   { background: #dbeafe; }
+    .btn-delete { background: #fff1f2; color: #e11d48; }
+    .btn-delete:hover { background: #ffe4e6; }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 20px;
+      color: #94a3b8;
+    }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state p { font-size: 14px; }
+
+    @media (max-width: 600px) {
+      .form-row { grid-template-columns: 1fr; }
+      header { padding: 0 16px; }
+      main { margin: 20px auto; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">SmartChatbot</div>
+  <div class="user-info">
+    <span id="user-email"></span>
+    <button class="btn-logout" onclick="logout()">登出</button>
+  </div>
+</header>
+
+<main>
+  <!-- 上傳區塊 -->
+  <div class="upload-card">
+    <h2>新增活動 Chatbot</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label>活動名稱 *</label>
+        <input type="text" id="chatbot-name" placeholder="例：2025 台北馬拉松" />
+      </div>
+      <div class="form-group">
+        <label>活動簡介（選填）</label>
+        <input type="text" id="chatbot-desc" placeholder="活動的簡短說明" />
+      </div>
+      <div class="form-group full">
+        <label>上傳活動 PDF *</label>
+        <div class="file-drop" id="file-drop">
+          <input type="file" accept=".pdf" id="pdf-input" onchange="onFileSelect(this)" />
+          <div class="icon">📄</div>
+          <div class="hint">點擊選擇或拖曳 PDF 至此</div>
+          <div class="filename" id="file-name"></div>
+        </div>
+      </div>
+    </div>
+    <button class="btn-primary" id="upload-btn" onclick="uploadPDF()">建立 Chatbot</button>
+    <div class="upload-msg" id="upload-msg"></div>
+  </div>
+
+  <!-- Chatbot 列表 -->
+  <div class="list-header">
+    <h2>我的 Chatbots</h2>
+  </div>
+  <div class="chatbot-grid" id="chatbot-list">
+    <div class="empty-state">
+      <div class="icon">🤖</div>
+      <p>載入中…</p>
+    </div>
+  </div>
+</main>
+
+<script>
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  let currentSession = null;
+  let pollingTimers  = {};
+
+  // ── 初始化 + Token 自動更新監聽 ──
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (!session) { location.href = 'index.html'; return; }
+    currentSession = session;
+    document.getElementById('user-email').textContent = session.user.email;
+    loadChatbots();
+  });
+
+  // 當 Supabase 自動刷新 token 時同步更新 currentSession
+  // 避免頁面開啟超過 1 小時後 API 呼叫因 token 過期而失敗
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT' || !session) {
+      location.href = 'index.html';
+    } else {
+      currentSession = session;
+    }
+  });
+
+  async function logout() {
+    await supabase.auth.signOut();
+    location.href = 'index.html';
+  }
+
+  // ── 檔案選擇 ──
+  function onFileSelect(input) {
+    const file = input.files[0];
+    document.getElementById('file-name').textContent = file ? file.name : '';
+  }
+
+  const drop = document.getElementById('file-drop');
+  drop.addEventListener('dragover',  e => { e.preventDefault(); drop.classList.add('drag'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('drag');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type === 'application/pdf') {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      document.getElementById('pdf-input').files = dt.files;
+      document.getElementById('file-name').textContent = file.name;
+    }
+  });
+
+  // ── 上傳 PDF ──
+  async function uploadPDF() {
+    const name = document.getElementById('chatbot-name').value.trim();
+    const desc = document.getElementById('chatbot-desc').value.trim();
+    const file = document.getElementById('pdf-input').files[0];
+    const msg  = document.getElementById('upload-msg');
+    const btn  = document.getElementById('upload-btn');
+
+    msg.className = 'upload-msg';
+
+    if (!name) { showMsg(msg, 'error', '請填寫活動名稱'); return; }
+    if (!file) { showMsg(msg, 'error', '請選擇 PDF 檔案'); return; }
+
+    btn.disabled = true;
+    btn.textContent = '上傳中…';
+    showMsg(msg, 'info', '正在上傳 PDF，請稍候…');
+
+    const formData = new FormData();
+    formData.append('name', name);
+    if (desc) formData.append('description', desc);
+    formData.append('pdf', file);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/saas/chatbots`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${currentSession.access_token}` },
+        body: formData
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        showMsg(msg, 'error', data.error || '上傳失敗，請再試一次');
+        return;
+      }
+
+      showMsg(msg, 'success', `✅ 上傳成功！正在處理 PDF，請稍候…`);
+      document.getElementById('chatbot-name').value = '';
+      document.getElementById('chatbot-desc').value = '';
+      document.getElementById('pdf-input').value   = '';
+      document.getElementById('file-name').textContent = '';
+
+      // 重新載入列表並開始輪詢
+      await loadChatbots();
+      startPolling(data.chatbot_id);
+
+    } catch (err) {
+      console.error('[uploadPDF] error:', err.message);
+      showMsg(msg, 'error', '連線失敗，請稍後再試');
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = '建立 Chatbot';
+    }
+  }
+
+  // ── 載入 Chatbot 列表 ──
+  async function loadChatbots() {
+    try {
+      const res = await fetch(`${API_BASE}/api/saas/chatbots`, {
+        headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const list = await res.json();
+      if (!Array.isArray(list)) throw new Error('回應格式錯誤');
+      renderList(list);
+      list.filter(c => c.status === 'processing').forEach(c => startPolling(c.id));
+    } catch (err) {
+      console.error('[loadChatbots] error:', err.message);
+      document.getElementById('chatbot-list').innerHTML = `
+        <div class="empty-state"><div class="icon">⚠️</div><p>載入失敗，請重新整理頁面</p></div>`;
+    }
+  }
+
+  function renderList(list) {
+    const container = document.getElementById('chatbot-list');
+    if (!list.length) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="icon">🤖</div>
+          <p>還沒有 Chatbot，上傳第一個活動 PDF 開始吧！</p>
+        </div>`;
+      return;
+    }
+
+    container.innerHTML = '';
+    list.forEach(c => {
+      // 用 DOM API 建立元素，完全避免 XSS
+      const card = document.createElement('div');
+      card.className = 'chatbot-card';
+      card.id = `card-${c.id}`;
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'chatbot-name';
+      nameEl.title       = c.name;        // textContent 等效，title 屬性安全賦值
+      nameEl.textContent = c.name;
+
+      const metaEl = document.createElement('div');
+      metaEl.className = 'chatbot-meta';
+      const parts = [];
+      if (c.chunk_count)  parts.push(`${c.chunk_count} 個段落`);
+      if (c.pdf_filename) parts.push(c.pdf_filename);
+      metaEl.textContent = parts.join('・');
+
+      const dateEl = document.createElement('div');
+      dateEl.className   = 'chatbot-meta';
+      dateEl.textContent = formatDate(c.created_at);
+
+      const actions = document.createElement('div');
+      actions.className  = 'card-actions';
+
+      const copyBtn = document.createElement('button');
+      copyBtn.className  = 'btn-sm btn-copy';
+      if (c.status === 'ready') {
+        copyBtn.textContent = '複製連結';
+        copyBtn.onclick = () => copyLink(c.id);
+      } else {
+        copyBtn.textContent = '處理中…';
+        copyBtn.disabled    = true;
+        copyBtn.style.cssText = 'opacity:0.4;cursor:not-allowed';
+      }
+
+      const delBtn = document.createElement('button');
+      delBtn.className   = 'btn-sm btn-delete';
+      delBtn.textContent = '刪除';
+      delBtn.onclick = () => deleteChatbot(c.id, c.name);
+
+      actions.append(copyBtn, delBtn);
+      card.append(nameEl, statusBadge(c.status), metaEl, dateEl, actions);
+      container.appendChild(card);
+    });
+  }
+
+  function statusBadge(status) {
+    const badge = document.createElement('span');
+    badge.className = `status-badge ${status}`;
+    if (status === 'ready') {
+      badge.textContent = '✓ 已就緒';
+    } else if (status === 'processing') {
+      const spinner = document.createElement('span');
+      spinner.className = 'spinner';
+      badge.append(spinner, ' 處理中');
+    } else if (status === 'error') {
+      badge.textContent = '✕ 處理失敗';
+    }
+    return badge;
+  }
+
+  // ── 輪詢處理狀態 ──
+  const POLL_INTERVAL_MS = 5000;   // 每 5 秒查一次
+  const POLL_TIMEOUT_MS  = 300000; // 最長等 5 分鐘，逾時視為失敗
+
+  function startPolling(chatbotId) {
+    if (pollingTimers[chatbotId]) return;
+
+    const startedAt = Date.now();
+
+    pollingTimers[chatbotId] = setInterval(async () => {
+      // 超過最長等待時間，停止輪詢
+      if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+        clearInterval(pollingTimers[chatbotId]);
+        delete pollingTimers[chatbotId];
+        await loadChatbots();
+        return;
+      }
+
+      try {
+        const res  = await fetch(`${API_BASE}/api/saas/chatbots/${chatbotId}/status`);
+        if (!res.ok) return; // 網路暫時錯誤，下次再試
+
+        const data = await res.json();
+        if (data.status !== 'processing') {
+          clearInterval(pollingTimers[chatbotId]);
+          delete pollingTimers[chatbotId];
+          await loadChatbots();
+        }
+      } catch (_err) {
+        // 網路錯誤靜默忽略，繼續輪詢直到逾時
+      }
+    }, POLL_INTERVAL_MS);
+  }
+
+  // ── 複製連結 ──
+  function copyLink(chatbotId) {
+    const url = `${location.origin}/chat.html?id=${chatbotId}`;
+    navigator.clipboard.writeText(url).then(() => alert('連結已複製！\n' + url));
+  }
+
+  // ── 刪除 Chatbot ──
+  async function deleteChatbot(id, name) {
+    if (!confirm(`確定要刪除「${name}」嗎？\n此操作無法復原。`)) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/saas/chatbots/${id}`, {
+        method:  'DELETE',
+        headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
+      });
+
+      if (res.ok) {
+        clearInterval(pollingTimers[id]);
+        delete pollingTimers[id];
+        await loadChatbots();
+      } else {
+        alert('刪除失敗，請再試一次');
+      }
+    } catch (err) {
+      console.error('[deleteChatbot] error:', err.message);
+      alert('連線失敗，請稍後再試');
+    }
+  }
+
+  // ── 工具函式 ──
+  function showMsg(el, type, text) {
+    el.className   = `upload-msg ${type}`;
+    el.textContent = text;
+  }
+
+  function formatDate(iso) {
+    return new Date(iso).toLocaleDateString('zh-TW', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit'
+    });
+  }
+</script>
+</body>
+</html>

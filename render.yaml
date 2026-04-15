@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: saas-chatbot-server
+    runtime: node
+    rootDir: server          # Render 從此目錄執行
+    buildCommand: npm install
+    startCommand: node server.js
+
+    # 環境變數（機密值請在 Render Dashboard 手動填寫，不要寫入此檔案）
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # ── 以下機密值在 Render Dashboard > Environment 中設定 ──
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: N8N_SAAS_WEBHOOK_URL
+        sync: false
+      - key: N8N_SAAS_CHAT_WEBHOOK_URL
+        sync: false
+      - key: SAAS_CALLBACK_SECRET
+        sync: false
+      # ALLOWED_ORIGINS 填入你的 Render URL，格式：https://saas-chatbot-server.onrender.com
+      - key: ALLOWED_ORIGINS
+        sync: false

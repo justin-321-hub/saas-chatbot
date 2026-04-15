@@ -1,0 +1,19 @@
+# 環境變數（絕對不能 commit）
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-error.log*
+package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

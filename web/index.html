@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartChatbot — 登入</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"
+          integrity="sha384-2zrRDgDHSYB/GN3nFW3fsZXoxEhKIr3N2h63Tc6DEOB9JJdFIu8xMJT2Cph/gBil"
+          crossorigin="anonymous"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f0f4ff;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      padding: 40px;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: #2563eb;
+      text-align: center;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #64748b;
+      font-size: 14px;
+      margin-bottom: 32px;
+    }
+
+    .tabs {
+      display: flex;
+      background: #f1f5f9;
+      border-radius: 8px;
+      padding: 4px;
+      margin-bottom: 28px;
+    }
+
+    .tab {
+      flex: 1;
+      text-align: center;
+      padding: 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      color: #64748b;
+      transition: all 0.2s;
+    }
+
+    .tab.active {
+      background: #fff;
+      color: #2563eb;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+
+    .form-group { margin-bottom: 16px; }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #374151;
+      margin-bottom: 6px;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus { border-color: #2563eb; }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: background 0.2s;
+    }
+
+    .btn:hover { background: #1d4ed8; }
+    .btn:disabled { background: #93c5fd; cursor: not-allowed; }
+
+    .msg {
+      margin-top: 14px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+    }
+
+    .msg.error   { background: #fef2f2; color: #dc2626; display: block; }
+    .msg.success { background: #f0fdf4; color: #16a34a; display: block; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo">SmartChatbot</div>
+  <div class="subtitle">上傳活動 PDF，自動建立專屬 Chatbot</div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('login')">登入</div>
+    <div class="tab"        onclick="switchTab('register')">註冊</div>
+  </div>
+
+  <!-- 登入表單 -->
+  <div id="form-login">
+    <div class="form-group">
+      <label>電子郵件</label>
+      <input type="email" id="login-email" placeholder="you@example.com" />
+    </div>
+    <div class="form-group">
+      <label>密碼</label>
+      <input type="password" id="login-password" placeholder="••••••••" />
+    </div>
+    <button class="btn" onclick="login()">登入</button>
+    <div class="msg" id="login-msg"></div>
+  </div>
+
+  <!-- 註冊表單 -->
+  <div id="form-register" style="display:none">
+    <div class="form-group">
+      <label>電子郵件</label>
+      <input type="email" id="reg-email" placeholder="you@example.com" />
+    </div>
+    <div class="form-group">
+      <label>密碼（至少 6 碼）</label>
+      <input type="password" id="reg-password" placeholder="••••••••" />
+    </div>
+    <button class="btn" onclick="register()">建立帳號</button>
+    <div class="msg" id="reg-msg"></div>
+  </div>
+</div>
+
+<script>
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // 已登入直接跳 dashboard
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (session) location.href = 'dashboard.html';
+  });
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach((t, i) => {
+      t.classList.toggle('active', (i === 0) === (tab === 'login'));
+    });
+    document.getElementById('form-login').style.display    = tab === 'login'    ? '' : 'none';
+    document.getElementById('form-register').style.display = tab === 'register' ? '' : 'none';
+  }
+
+  async function login() {
+    const email    = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const msg      = document.getElementById('login-msg');
+    msg.className  = 'msg';
+
+    if (!email || !password) {
+      msg.className = 'msg error';
+      msg.textContent = '請填寫電子郵件與密碼';
+      return;
+    }
+
+    const btn = document.querySelector('#form-login .btn');
+    btn.disabled = true;
+    btn.textContent = '登入中…';
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (error) {
+      // 只顯示已知的友善訊息，其餘一律用通用訊息（防止錯誤訊息洩漏內部資訊）
+      const LOGIN_ERRORS = {
+        'Invalid login credentials':   '電子郵件或密碼錯誤',
+        'Email not confirmed':          '請先至信箱完成電子郵件驗證',
+        'Too many requests':            '登入嘗試次數過多，請稍後再試',
+        'User not found':               '電子郵件或密碼錯誤',
+      };
+      msg.className   = 'msg error';
+      msg.textContent = LOGIN_ERRORS[error.message] ?? '登入失敗，請稍後再試';
+      btn.disabled    = false;
+      btn.textContent = '登入';
+    } else {
+      location.href = 'dashboard.html';
+    }
+  }
+
+  async function register() {
+    const email    = document.getElementById('reg-email').value.trim();
+    const password = document.getElementById('reg-password').value;
+    const msg      = document.getElementById('reg-msg');
+    msg.className  = 'msg';
+
+    if (!email || !password) {
+      msg.className = 'msg error';
+      msg.textContent = '請填寫所有欄位';
+      return;
+    }
+    if (password.length < 6) {
+      msg.className = 'msg error';
+      msg.textContent = '密碼至少需要 6 個字元';
+      return;
+    }
+
+    const btn = document.querySelector('#form-register .btn');
+    btn.disabled = true;
+    btn.textContent = '建立中…';
+
+    const { error } = await supabase.auth.signUp({ email, password });
+
+    if (error) {
+      const REG_ERRORS = {
+        'User already registered':                    '此電子郵件已被使用',
+        'Password should be at least 6 characters':   '密碼至少需要 6 個字元',
+        'Unable to validate email address: invalid format': '電子郵件格式不正確',
+        'Too many requests':                          '請求次數過多，請稍後再試',
+      };
+      msg.className   = 'msg error';
+      msg.textContent = REG_ERRORS[error.message] ?? '帳號建立失敗，請稍後再試';
+      btn.disabled    = false;
+      btn.textContent = '建立帳號';
+    } else {
+      msg.className   = 'msg success';
+      msg.textContent = '帳號建立成功！請查收驗證信，或直接登入。';
+      btn.disabled    = false;
+      btn.textContent = '建立帳號';
+    }
+  }
+
+  // Enter 鍵觸發
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const loginVisible = document.getElementById('form-login').style.display !== 'none';
+    if (loginVisible) login(); else register();
+  });
+</script>
+</body>
+</html>
